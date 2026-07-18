@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(node prisma/seed.js)",
+      "Bash(timeout 5 node src/index.js)",
+      "Bash(node -e \"import\\('./src/index.js'\\)\")",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"alice@example.com\",\"password\":\"demo123\"}')",
+      "Bash(curl -s http://localhost:3001/api/admin/system/status)",
+      "Bash(curl -s http://localhost:3001/api/approval/policies -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiZjhjZWUyZC0zNGQzLTQwYjAtYTg0Zi1iNmI4MTU0MjRlZjUiLCJkZXZpY2VJZCI6ImFiODZhOGY4LTcxZGYtNDhkZS1hOTlkLTY3ZmUxMmU3MGRmOCIsInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3ODQ0MTA0ODEsImV4cCI6MTc4NDQxMTM4MX0.IUd5mQlIFZbCC85y7wSZXFRDfRgONJjwF9XWYoCqpPE')",
+      "Bash(curl -s -X POST http://localhost:3001/api/risk/assess/login -H 'Content-Type: application/json' -d '{\"email\":\"alice@example.com\"}')",
+      "Bash(pkill -f \"node src/index.js\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh auth *)",
+      "Bash(where gh *)",
+      "Bash(git config *)"
+    ]
+  }
+}
