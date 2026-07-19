@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken';
 import { generateSecureToken } from './crypto.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'hackathon-secret-change-in-production';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+if (!process.env.JWT_SECRET && NODE_ENV === 'production') {
+  console.error('FATAL: JWT_SECRET environment variable is required in production');
+  process.exit(1);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'hackathon-dev-secret-not-for-production';
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 

@@ -7,11 +7,11 @@ body {
 }
 
 .gradient-bg {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f3f4f6;
 }
 
 .card {
-  @apply bg-white rounded-xl shadow-lg p-6;
+  @apply bg-white rounded-lg shadow p-6 border border-gray-200;
 }
 
 .btn {
@@ -62,21 +62,3 @@ body {
   @apply bg-blue-100 text-blue-800;
 }
 
-@keyframes pulse-ring {
-  0% {
-    transform: scale(0.8);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1.5);
-    opacity: 0;
-  }
-}
-
-.pulse-ring::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  animation: pulse-ring 1.5s ease-out infinite;
-}

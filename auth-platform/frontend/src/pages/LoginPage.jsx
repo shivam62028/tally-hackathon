@@ -121,9 +121,8 @@ export default function LoginPage() {
         <button
           onClick={handlePasskeyLogin}
           disabled={passkeyLoading}
-          className="btn w-full bg-gray-900 text-white hover:bg-gray-800 mb-4 flex items-center justify-center gap-2"
+          className="btn w-full bg-gray-900 text-white hover:bg-gray-800 mb-4"
         >
-          <span>🔑</span>
           {passkeyLoading ? 'Authenticating...' : 'Sign in with Passkey'}
         </button>
 

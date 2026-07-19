@@ -3,10 +3,12 @@ import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import { generateTokens } from '../utils/jwt.js';
 import { generateSecureToken, hashData } from '../utils/crypto.js';
+import { RiskService } from './risk.service.js';
 
 export class AuthService {
   constructor(prisma) {
     this.prisma = prisma;
+    this.riskService = new RiskService(prisma);
   }
 
   async register(email, password) {
@@ -31,20 +33,39 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
     if (!user || !user.passwordHash) {
+      await this.riskService.logFailedLogin(email, ipAddress, deviceInfo?.userAgent, 'Invalid credentials');
       throw new Error('Invalid credentials');
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      await this.riskService.logFailedLogin(email, ipAddress, deviceInfo?.userAgent, 'Wrong password');
       throw new Error('Invalid credentials');
     }
 
-    if (user.totpEnabled) {
+    const riskAssessment = await this.riskService.assessLoginRisk(user.id, deviceInfo, ipAddress);
+
+    if (riskAssessment.decision === 'block') {
+      throw new Error('Login blocked due to suspicious activity. Please try again later or contact support.');
+    }
+
+    if (riskAssessment.decision === 'restrict') {
+      throw new Error('Login restricted. Please verify your identity through another method or contact support.');
+    }
+
+    const requiresStepUp = riskAssessment.decision === 'step_up' || user.totpEnabled;
+
+    if (requiresStepUp) {
+      if (!user.totpEnabled) {
+        throw new Error('Additional verification required but TOTP is not set up. Please enable two-factor authentication.');
+      }
       const pendingToken = generateSecureToken(32);
       return {
         requiresTOTP: true,
         pendingToken,
-        userId: user.id
+        userId: user.id,
+        riskLevel: riskAssessment.riskLevel,
+        riskReason: riskAssessment.decision === 'step_up' ? riskAssessment.explanation : null
       };
     }
 
@@ -126,12 +147,14 @@ export class AuthService {
   async createSession(userId, deviceInfo, ipAddress) {
     const device = await this.getOrCreateDevice(userId, deviceInfo, ipAddress);
     const tokens = generateTokens(userId, device.id);
+    const tokenFamily = generateSecureToken(16);
 
     await this.prisma.session.create({
       data: {
         userId,
         token: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokenFamily,
         deviceId: device.id,
         ipAddress,
         userAgent: deviceInfo?.userAgent,
@@ -180,12 +203,28 @@ export class AuthService {
   }
 
   async refreshSession(refreshToken, ipAddress) {
-    const session = await this.prisma.session.findUnique({
+    let session = await this.prisma.session.findUnique({
       where: { refreshToken },
       include: { user: true }
     });
 
-    if (!session || session.isRevoked || session.expiresAt < new Date()) {
+    if (!session) {
+      const reusedSession = await this.prisma.session.findFirst({
+        where: { previousRefreshToken: refreshToken }
+      });
+
+      if (reusedSession && reusedSession.tokenFamily) {
+        await this.prisma.session.updateMany({
+          where: { tokenFamily: reusedSession.tokenFamily },
+          data: { isRevoked: true }
+        });
+        throw new Error('Refresh token reuse detected. All sessions in this family have been revoked for security.');
+      }
+
+      throw new Error('Invalid refresh token');
+    }
+
+    if (session.isRevoked || session.expiresAt < new Date()) {
       throw new Error('Invalid or expired refresh token');
     }
 
@@ -195,6 +234,7 @@ export class AuthService {
       where: { id: session.id },
       data: {
         token: tokens.accessToken,
+        previousRefreshToken: refreshToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.refreshExpiry
       }

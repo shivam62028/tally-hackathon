@@ -11,10 +11,10 @@ export default function Layout() {
   };
 
   const navLinks = [
-    { to: '/dashboard', label: 'Dashboard', icon: '🏠' },
-    { to: '/security', label: 'Security', icon: '🔐' },
-    { to: '/approvals', label: 'Approvals', icon: '✅' },
-    { to: '/admin', label: 'Admin', icon: '⚙️' }
+    { to: '/dashboard', label: 'Dashboard' },
+    { to: '/security', label: 'Security' },
+    { to: '/approvals', label: 'Approvals' },
+    { to: '/admin', label: 'Admin' }
   ];
 
   return (
@@ -32,14 +32,13 @@ export default function Layout() {
                     key={link.to}
                     to={link.to}
                     className={({ isActive }) =>
-                      `inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                      `px-3 py-2 text-sm font-medium rounded-md ${
                         isActive
-                          ? 'bg-indigo-100 text-indigo-700'
-                          : 'text-gray-600 hover:bg-gray-100'
+                          ? 'bg-gray-100 text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-50'
                       }`
                     }
                   >
-                    <span className="mr-2">{link.icon}</span>
                     {link.label}
                   </NavLink>
                 ))}

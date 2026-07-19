@@ -155,17 +155,14 @@ export default function SecurityPage() {
         ) : (
           <div className="space-y-3">
             {passkeys.map(pk => (
-              <div key={pk.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🔑</span>
-                  <div>
-                    <div className="font-medium">
-                      {pk.deviceType === 'multiDevice' ? 'Synced Passkey' : 'Device Passkey'}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      Added {new Date(pk.createdAt).toLocaleDateString()}
-                      {pk.lastUsed && ` · Last used ${new Date(pk.lastUsed).toLocaleDateString()}`}
-                    </div>
+              <div key={pk.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <div className="font-medium">
+                    {pk.deviceType === 'multiDevice' ? 'Synced Passkey' : 'Device Passkey'}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Added {new Date(pk.createdAt).toLocaleDateString()}
+                    {pk.lastUsed && ` · Last used ${new Date(pk.lastUsed).toLocaleDateString()}`}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -290,17 +287,14 @@ export default function SecurityPage() {
         ) : (
           <div className="space-y-3">
             {user?.devices?.map(device => (
-              <div key={device.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">💻</span>
-                  <div>
-                    <div className="font-medium flex items-center gap-2">
-                      {device.userAgent?.includes('Mobile') ? 'Mobile Device' : 'Desktop'}
-                      {device.isTrusted && <span className="badge badge-success">Trusted</span>}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      Last seen {new Date(device.lastSeen).toLocaleString()}
-                    </div>
+              <div key={device.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <div className="font-medium flex items-center gap-2">
+                    {device.userAgent?.includes('Mobile') ? 'Mobile Device' : 'Desktop'}
+                    {device.isTrusted && <span className="badge badge-success">Trusted</span>}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Last seen {new Date(device.lastSeen).toLocaleString()}
                   </div>
                 </div>
                 <div className="flex gap-2">

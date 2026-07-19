@@ -55,7 +55,7 @@ export class ApprovalService {
     });
   }
 
-  async createApprovalRequest(requesterId, actionType, actionPayload) {
+  async createApprovalRequest(requesterId, actionType, actionPayload, adjustedRequiredWeight = null) {
     const policy = await this.getPolicyByAction(actionType);
 
     if (!policy) {
@@ -67,6 +67,10 @@ export class ApprovalService {
 
     const expiresAt = new Date(Date.now() + policy.timeoutMinutes * 60 * 1000);
 
+    const effectiveRequiredWeight = adjustedRequiredWeight !== null
+      ? Math.max(policy.requiredWeight, adjustedRequiredWeight)
+      : policy.requiredWeight;
+
     const request = await this.prisma.approvalRequest.create({
       data: {
         requesterId,
@@ -74,7 +78,7 @@ export class ApprovalService {
         actionType,
         actionPayload: payloadString,
         payloadHash,
-        requiredWeight: policy.requiredWeight,
+        requiredWeight: effectiveRequiredWeight,
         expiresAt
       }
     });
@@ -247,17 +251,61 @@ export class ApprovalService {
   async escalateRequest(requestId) {
     const request = await this.getApprovalRequest(requestId);
 
-    if (!request || !request.policy.escalationChain) {
+    if (!request) {
+      throw new Error('Approval request not found');
+    }
+
+    if (!request.policy.escalationChain) {
       throw new Error('Cannot escalate: no escalation chain configured');
     }
 
-    const escalationChain = JSON.parse(request.policy.escalationChain);
+    if (request.status !== 'pending') {
+      throw new Error(`Cannot escalate a ${request.status} request`);
+    }
 
-    await this.addAuditLog(requestId, 'request_escalated', null, {
-      escalationChain
+    const escalationChain = JSON.parse(request.policy.escalationChain);
+    const currentApproverIds = request.policy.approverRoles.map(ar => ar.userId);
+
+    let addedApprovers = [];
+    for (const escalationLevel of escalationChain) {
+      const backupUserId = escalationLevel.userId || escalationLevel.backupUserId;
+      const backupWeight = escalationLevel.weight || 1;
+
+      if (backupUserId && !currentApproverIds.includes(backupUserId)) {
+        try {
+          await this.prisma.approverRole.create({
+            data: {
+              policyId: request.policyId,
+              userId: backupUserId,
+              weight: backupWeight,
+              priority: 10
+            }
+          });
+          addedApprovers.push({ userId: backupUserId, weight: backupWeight });
+        } catch (err) {
+          if (err.code !== 'P2002') throw err;
+        }
+      }
+    }
+
+    const newExpiresAt = new Date(Date.now() + request.policy.timeoutMinutes * 60 * 1000);
+    await this.prisma.approvalRequest.update({
+      where: { id: requestId },
+      data: { expiresAt: newExpiresAt }
     });
 
-    return { escalated: true, chain: escalationChain };
+    await this.addAuditLog(requestId, 'request_escalated', null, {
+      escalationChain,
+      addedApprovers,
+      newExpiresAt: newExpiresAt.toISOString()
+    });
+
+    return {
+      escalated: true,
+      chain: escalationChain,
+      addedApprovers,
+      newExpiresAt
+    };
   }
 
   async getPendingApprovals(approverId) {

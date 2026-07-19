@@ -5,7 +5,8 @@ import {
   verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import { generateTokens } from '../utils/jwt.js';
-import { hashData } from '../utils/crypto.js';
+import { hashData, generateSecureToken } from '../utils/crypto.js';
+import { RiskService } from './risk.service.js';
 
 const RP_NAME = 'Auth Platform';
 const RP_ID = process.env.RP_ID || 'localhost';
@@ -15,6 +16,7 @@ export class PasskeyService {
   constructor(prisma) {
     this.prisma = prisma;
     this.challenges = new Map();
+    this.riskService = new RiskService(prisma);
   }
 
   async generateRegistrationOptions(userId) {
@@ -175,6 +177,16 @@ export class PasskeyService {
       throw new Error('Passkey authentication failed');
     }
 
+    const riskAssessment = await this.riskService.assessLoginRisk(passkey.userId, deviceInfo, ipAddress);
+
+    if (riskAssessment.decision === 'block') {
+      throw new Error('Login blocked due to suspicious activity. Please try again later or contact support.');
+    }
+
+    if (riskAssessment.decision === 'restrict') {
+      throw new Error('Login restricted. Please verify your identity through another method or contact support.');
+    }
+
     await this.prisma.passkey.update({
       where: { id: passkey.id },
       data: {
@@ -187,12 +199,14 @@ export class PasskeyService {
 
     const device = await this.getOrCreateDevice(passkey.userId, deviceInfo, ipAddress);
     const tokens = generateTokens(passkey.userId, device.id);
+    const tokenFamily = generateSecureToken(16);
 
     await this.prisma.session.create({
       data: {
         userId: passkey.userId,
         token: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokenFamily,
         deviceId: device.id,
         ipAddress,
         userAgent: deviceInfo?.userAgent,
@@ -205,7 +219,8 @@ export class PasskeyService {
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.accessExpiry,
       user: { id: passkey.userId, email: passkey.user.email },
-      device: { id: device.id, isTrusted: device.isTrusted }
+      device: { id: device.id, isTrusted: device.isTrusted },
+      riskLevel: riskAssessment.riskLevel
     };
   }
 

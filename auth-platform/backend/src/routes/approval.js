@@ -117,11 +117,40 @@ router.post('/request', authenticate, async (req, res, next) => {
       ipAddress
     );
 
+    if (riskAssessment.decision === 'block') {
+      return res.status(403).json({
+        error: 'Action blocked due to high risk',
+        riskAssessment: {
+          score: riskAssessment.riskScore,
+          level: riskAssessment.riskLevel,
+          explanation: riskAssessment.explanation
+        }
+      });
+    }
+
+    if (riskAssessment.decision === 'restrict') {
+      return res.status(403).json({
+        error: 'Action restricted. Please verify your identity or use a trusted device.',
+        riskAssessment: {
+          score: riskAssessment.riskScore,
+          level: riskAssessment.riskLevel,
+          explanation: riskAssessment.explanation
+        }
+      });
+    }
+
     const approvalService = new ApprovalService(req.prisma);
+
+    let adjustedRequiredWeight = null;
+    if (riskAssessment.requiresApproval && riskAssessment.riskLevel === 'high') {
+      adjustedRequiredWeight = 2;
+    }
+
     const request = await approvalService.createApprovalRequest(
       req.userId,
       actionType,
-      { ...actionPayload, riskAssessment }
+      { ...actionPayload, riskAssessment },
+      adjustedRequiredWeight
     );
 
     res.status(201).json({
@@ -129,7 +158,9 @@ router.post('/request', authenticate, async (req, res, next) => {
       riskAssessment: {
         score: riskAssessment.riskScore,
         level: riskAssessment.riskLevel,
-        explanation: riskAssessment.explanation
+        explanation: riskAssessment.explanation,
+        requiresApproval: riskAssessment.requiresApproval,
+        weightAdjusted: adjustedRequiredWeight !== null
       }
     });
   } catch (err) {

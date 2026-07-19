@@ -55,17 +55,19 @@ model Passkey {
 }
 
 model Session {
-  id            String   @id @default(uuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token         String   @unique
-  refreshToken  String   @unique
-  deviceId      String?
-  ipAddress     String?
-  userAgent     String?
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
-  isRevoked     Boolean  @default(false)
+  id                   String   @id @default(uuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token                String   @unique
+  refreshToken         String   @unique
+  previousRefreshToken String?
+  tokenFamily          String?
+  deviceId             String?
+  ipAddress            String?
+  userAgent            String?
+  expiresAt            DateTime
+  createdAt            DateTime @default(now())
+  isRevoked            Boolean  @default(false)
 }
 
 model RiskEvent {
