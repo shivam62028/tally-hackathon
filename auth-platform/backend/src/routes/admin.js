@@ -76,6 +76,24 @@ router.post('/send-verification', authenticate, async (req, res, next) => {
     const failoverService = getFailoverService(req.prisma);
     const result = await failoverService.sendVerificationCode(req.userId, preferredMethod);
 
+    const explanation = failoverService.getFailoverExplanation(result);
+
+    res.json({
+      ...result,
+      failoverExplanation: explanation
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/simulate-failure/:provider', async (req, res, next) => {
+  try {
+    const { provider } = req.params;
+    const { durationSeconds = 30 } = req.body;
+    const failoverService = getFailoverService(req.prisma);
+    const result = failoverService.simulateProviderFailure(provider, durationSeconds * 1000);
+
     res.json(result);
   } catch (err) {
     next(err);

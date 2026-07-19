@@ -80,7 +80,16 @@ export default function AdminPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">System Status</h2>
+          <div>
+            <h2 className="text-lg font-semibold">System Status</h2>
+            {systemStatus?.systemHealthy ? (
+              <span className="text-sm text-green-600">All systems operational</span>
+            ) : (
+              <span className="text-sm text-red-600">
+                {systemStatus?.unhealthyProviders?.length || 0} provider(s) degraded
+              </span>
+            )}
+          </div>
           <button onClick={handleHealthCheck} className="btn btn-secondary text-sm">
             Run Health Check
           </button>

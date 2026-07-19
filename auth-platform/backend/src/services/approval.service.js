@@ -3,7 +3,28 @@ import { hashData, generateChainedHash, signData, verifySignature, generateKeyPa
 export class ApprovalService {
   constructor(prisma) {
     this.prisma = prisma;
-    this.signingKeys = new Map();
+  }
+
+  async getOrCreateSigningKey(userId) {
+    let keyRecord = await this.prisma.approverSigningKey.findUnique({
+      where: { userId }
+    });
+
+    if (!keyRecord) {
+      const keyPair = generateKeyPair();
+      keyRecord = await this.prisma.approverSigningKey.create({
+        data: {
+          userId,
+          publicKey: keyPair.publicKey,
+          privateKey: keyPair.privateKey
+        }
+      });
+    }
+
+    return {
+      publicKey: keyRecord.publicKey,
+      privateKey: keyRecord.privateKey
+    };
   }
 
   async createPolicy(data) {
@@ -168,15 +189,8 @@ export class ApprovalService {
       timestamp: new Date().toISOString()
     };
 
-    let signature;
-    if (this.signingKeys.has(approverId)) {
-      const { privateKey } = this.signingKeys.get(approverId);
-      signature = signData(signedData, privateKey);
-    } else {
-      const keyPair = generateKeyPair();
-      this.signingKeys.set(approverId, keyPair);
-      signature = signData(signedData, keyPair.privateKey);
-    }
+    const keyPair = await this.getOrCreateSigningKey(approverId);
+    const signature = signData(signedData, keyPair.privateKey);
 
     const vote = await this.prisma.approvalVote.create({
       data: {
@@ -379,11 +393,15 @@ export class ApprovalService {
 
     for (const vote of request.votes) {
       const signedData = JSON.parse(vote.signedData);
-      const keyPair = this.signingKeys.get(vote.approverId);
+      const keyRecord = await this.prisma.approverSigningKey.findUnique({
+        where: { userId: vote.approverId }
+      });
 
       let isValid = false;
-      if (keyPair) {
-        isValid = verifySignature(signedData, vote.signature, keyPair.publicKey);
+      let keyStatus = 'missing';
+      if (keyRecord) {
+        isValid = verifySignature(signedData, vote.signature, keyRecord.publicKey);
+        keyStatus = isValid ? 'valid' : 'invalid';
       }
 
       verificationResults.push({
@@ -393,6 +411,7 @@ export class ApprovalService {
         weight: vote.weight,
         timestamp: signedData.timestamp,
         signatureValid: isValid,
+        keyStatus,
         signedPayloadHash: signedData.payloadHash,
         matchesRequest: signedData.payloadHash === request.payloadHash
       });

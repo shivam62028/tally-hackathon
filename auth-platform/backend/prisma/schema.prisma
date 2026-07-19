@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -13,6 +13,7 @@ model User {
   passwordHash      String?
   totpSecret        String?
   totpEnabled       Boolean  @default(false)
+  role              String   @default("user")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -23,6 +24,18 @@ model User {
   approvalRequests  ApprovalRequest[]  @relation("Requester")
   approvalVotes     ApprovalVote[]
   approverRoles     ApproverRole[]
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  permissions  String   @default("all")
+  isActive     Boolean  @default(true)
+  lastLogin    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Device {
@@ -172,4 +185,82 @@ model FailoverStatus {
   isHealthy   Boolean  @default(true)
   lastCheck   DateTime @default(now())
   failCount   Int      @default(0)
+}
+
+model ApproverSigningKey {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  publicKey   String
+  privateKey  String
+  createdAt   DateTime @default(now())
+}
+
+model WebAuthnChallenge {
+  id          String   @id @default(uuid())
+  identifier  String   @unique
+  challenge   String
+  type        String
+  userId      String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model ApiKey {
+  id          String   @id @default(uuid())
+  name        String
+  keyHash     String   @unique
+  keyPrefix   String
+  permissions String
+  userId      String?
+  isActive    Boolean  @default(true)
+  lastUsed    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model LoginAttempt {
+  id           String   @id @default(uuid())
+  email        String
+  ipAddress    String?
+  userAgent    String?
+  success      Boolean
+  failReason   String?
+  attemptCount Int      @default(1)
+  createdAt    DateTime @default(now())
+
+  @@index([email, createdAt])
+}
+
+model AccountLock {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  lockedAt    DateTime @default(now())
+  lockedUntil DateTime
+  reason      String
+}
+
+model AdminNotification {
+  id          String   @id @default(uuid())
+  type        String
+  title       String
+  message     String
+  email       String?
+  ipAddress   String?
+  isRead      Boolean  @default(false)
+  isResolved  Boolean  @default(false)
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  metadata    String?
+  createdAt   DateTime @default(now())
+}
+
+model PasswordResetRequest {
+  id          String   @id @default(uuid())
+  email       String
+  reason      String?
+  status      String   @default("pending")
+  adminNotes  String?
+  processedBy String?
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
 }

@@ -47,9 +47,14 @@ export default function ApprovalsPage() {
       }
 
       const result = await approvalApi.createRequest(selectedAction, payload);
+      const riskInfo = result.riskAssessment;
+      let riskMessage = `Approval request created. Risk score: ${riskInfo?.score || 'N/A'}/100 (${riskInfo?.level || 'unknown'})`;
+      if (riskInfo?.weightAdjusted) {
+        riskMessage += '. Additional approvers required due to elevated risk.';
+      }
       setMessage({
         type: 'success',
-        text: `Approval request created. Risk score: ${result.riskAssessment?.score || 'N/A'}`
+        text: riskMessage
       });
       setSelectedAction('');
       setActionPayload('');
@@ -289,21 +294,25 @@ export default function ApprovalsPage() {
             </div>
 
             <div>
-              <h3 className="font-medium mb-2">Vote Signatures</h3>
+              <h3 className="font-medium mb-2">Vote Signatures (Cryptographic Proof)</h3>
+              <p className="text-xs text-gray-500 mb-2">Each vote is digitally signed. This proves who approved and that the approval hasn't been tampered with.</p>
               <div className="space-y-2">
                 {verificationResult.votes?.map((v, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
+                  <div key={i} className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
                     <span className={`w-3 h-3 rounded-full ${
                       v.signatureValid && v.matchesRequest ? 'bg-green-500' : 'bg-red-500'
                     }`}></span>
-                    <span>{v.approverEmail}</span>
-                    <span className="text-gray-500">
-                      {v.decision} (weight: {v.weight})
+                    <span className="font-medium">{v.approverEmail}</span>
+                    <span className={`${v.decision === 'approve' ? 'text-green-600' : 'text-red-600'}`}>
+                      {v.decision}
                     </span>
+                    <span className="text-gray-400">(weight: {v.weight})</span>
                     {v.signatureValid && v.matchesRequest ? (
-                      <span className="text-green-600 text-xs">Valid signature</span>
+                      <span className="text-green-600 text-xs bg-green-50 px-2 py-0.5 rounded">Verified</span>
                     ) : (
-                      <span className="text-red-600 text-xs">Invalid</span>
+                      <span className="text-red-600 text-xs bg-red-50 px-2 py-0.5 rounded">
+                        {v.keyStatus === 'missing' ? 'Key not found' : 'Invalid signature'}
+                      </span>
                     )}
                   </div>
                 ))}
@@ -311,12 +320,19 @@ export default function ApprovalsPage() {
             </div>
 
             <div>
-              <h3 className="font-medium mb-2">Audit Chain Integrity</h3>
+              <h3 className="font-medium mb-2">Audit Chain Integrity (Tamper Detection)</h3>
+              <p className="text-xs text-gray-500 mb-2">Each action in this approval is hash-chained. If any record was modified, the chain would break.</p>
               <div className="text-sm">
                 {verificationResult.auditChain?.every(a => a.chainIntact) ? (
-                  <span className="text-green-600">Chain intact</span>
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                    <span className="text-green-600">All {verificationResult.auditChain?.length} records verified - no tampering detected</span>
+                  </div>
                 ) : (
-                  <span className="text-red-600">Chain broken</span>
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-red-500"></span>
+                    <span className="text-red-600">Chain integrity compromised - records may have been modified</span>
+                  </div>
                 )}
               </div>
             </div>

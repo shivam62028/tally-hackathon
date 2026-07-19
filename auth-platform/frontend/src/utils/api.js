@@ -150,6 +150,15 @@ export const adminApi = {
   healthCheck: () => api.post('/admin/system/health-check', {}),
   activateKillSwitch: (provider) => api.post(`/admin/killswitch/${provider}/activate`, {}),
   deactivateKillSwitch: (provider) => api.post(`/admin/killswitch/${provider}/deactivate`, {}),
+  simulateFailure: (provider, durationSeconds = 30) =>
+    api.post(`/admin/simulate-failure/${provider}`, { durationSeconds }),
   getStats: () => api.get('/admin/stats'),
   getUsers: () => api.get('/admin/users')
+};
+
+export const integrationApi = {
+  createApiKey: (name, permissions, expiresInDays) =>
+    api.post('/integration/api-keys', { name, permissions, expiresInDays }),
+  listApiKeys: () => api.get('/integration/api-keys'),
+  revokeApiKey: (keyId) => api.delete(`/integration/api-keys/${keyId}`)
 };

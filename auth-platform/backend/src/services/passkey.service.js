@@ -7,6 +7,7 @@ import {
 import { generateTokens } from '../utils/jwt.js';
 import { hashData, generateSecureToken } from '../utils/crypto.js';
 import { RiskService } from './risk.service.js';
+import { LoginAttemptService } from './loginAttempt.service.js';
 
 const RP_NAME = 'Auth Platform';
 const RP_ID = process.env.RP_ID || 'localhost';
@@ -15,8 +16,48 @@ const ORIGIN = process.env.ORIGIN || 'http://localhost:5173';
 export class PasskeyService {
   constructor(prisma) {
     this.prisma = prisma;
-    this.challenges = new Map();
     this.riskService = new RiskService(prisma);
+    this.loginAttemptService = new LoginAttemptService(prisma);
+  }
+
+  async storeChallenge(identifier, challenge, type, userId = null, ttlMinutes = 5) {
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+    await this.prisma.webAuthnChallenge.deleteMany({
+      where: { expiresAt: { lt: new Date() } }
+    });
+
+    await this.prisma.webAuthnChallenge.upsert({
+      where: { identifier },
+      update: { challenge, type, userId, expiresAt },
+      create: { identifier, challenge, type, userId, expiresAt }
+    });
+  }
+
+  async getChallenge(identifier) {
+    const record = await this.prisma.webAuthnChallenge.findUnique({
+      where: { identifier }
+    });
+
+    if (!record) return null;
+
+    if (new Date() > record.expiresAt) {
+      await this.prisma.webAuthnChallenge.delete({ where: { identifier } });
+      return null;
+    }
+
+    return {
+      challenge: record.challenge,
+      type: record.type,
+      userId: record.userId,
+      expires: record.expiresAt.getTime()
+    };
+  }
+
+  async deleteChallenge(identifier) {
+    await this.prisma.webAuthnChallenge.deleteMany({
+      where: { identifier }
+    });
   }
 
   async generateRegistrationOptions(userId) {
@@ -48,25 +89,16 @@ export class PasskeyService {
       }
     });
 
-    this.challenges.set(userId, {
-      challenge: options.challenge,
-      type: 'registration',
-      expires: Date.now() + 5 * 60 * 1000
-    });
+    await this.storeChallenge(`reg_${userId}`, options.challenge, 'registration', userId);
 
     return options;
   }
 
   async verifyRegistration(userId, response) {
-    const challengeData = this.challenges.get(userId);
+    const challengeData = await this.getChallenge(`reg_${userId}`);
 
     if (!challengeData || challengeData.type !== 'registration') {
       throw new Error('No registration challenge found');
-    }
-
-    if (Date.now() > challengeData.expires) {
-      this.challenges.delete(userId);
-      throw new Error('Challenge expired');
     }
 
     const verification = await verifyRegistrationResponse({
@@ -80,14 +112,14 @@ export class PasskeyService {
       throw new Error('Passkey verification failed');
     }
 
-    const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+    const { credentialID, credentialPublicKey, counter, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
 
     const passkey = await this.prisma.passkey.create({
       data: {
         userId,
-        credentialId: Buffer.from(credential.id).toString('base64url'),
-        credentialPublicKey: Buffer.from(credential.publicKey),
-        counter: BigInt(credential.counter),
+        credentialId: Buffer.from(credentialID).toString('base64url'),
+        credentialPublicKey: Buffer.from(credentialPublicKey),
+        counter: BigInt(counter),
         deviceType: credentialDeviceType,
         backedUp: credentialBackedUp,
         transports: response.response.transports
@@ -96,7 +128,7 @@ export class PasskeyService {
       }
     });
 
-    this.challenges.delete(userId);
+    await this.deleteChallenge(`reg_${userId}`);
 
     return {
       verified: true,
@@ -126,28 +158,25 @@ export class PasskeyService {
       userVerification: 'preferred'
     });
 
-    const challengeKey = email || 'anonymous';
-    this.challenges.set(challengeKey, {
-      challenge: options.challenge,
-      type: 'authentication',
-      expires: Date.now() + 5 * 60 * 1000,
-      userId: user?.id
-    });
+    const challengeKey = `auth_${email || 'anonymous'}`;
+    await this.storeChallenge(challengeKey, options.challenge, 'authentication', user?.id);
 
     return { ...options, userId: user?.id };
   }
 
   async verifyAuthentication(response, email, deviceInfo, ipAddress) {
-    const challengeKey = email || 'anonymous';
-    const challengeData = this.challenges.get(challengeKey);
+    const challengeKey = `auth_${email || 'anonymous'}`;
+    const challengeData = await this.getChallenge(challengeKey);
 
     if (!challengeData || challengeData.type !== 'authentication') {
       throw new Error('No authentication challenge found');
     }
 
-    if (Date.now() > challengeData.expires) {
-      this.challenges.delete(challengeKey);
-      throw new Error('Challenge expired');
+    if (email) {
+      const lockStatus = await this.loginAttemptService.checkAccountLock(email);
+      if (lockStatus.locked) {
+        throw new Error(`Account temporarily locked. Try again in ${lockStatus.remainingMinutes} minute(s).`);
+      }
     }
 
     const credentialIdBase64 = Buffer.from(response.id, 'base64url').toString('base64url');
@@ -158,24 +187,52 @@ export class PasskeyService {
     });
 
     if (!passkey) {
+      if (email) {
+        const attemptResult = await this.loginAttemptService.recordAttempt(
+          email, ipAddress, deviceInfo?.userAgent, false, 'Passkey not found'
+        );
+        const warningMsg = this.loginAttemptService.getAttemptWarningMessage(
+          attemptResult.attemptCount, attemptResult.remainingAttempts
+        );
+        if (warningMsg) throw new Error(warningMsg);
+      }
       throw new Error('Passkey not found');
     }
 
-    const verification = await verifyAuthenticationResponse({
-      response,
-      expectedChallenge: challengeData.challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-      credential: {
-        id: Buffer.from(passkey.credentialId, 'base64url'),
-        publicKey: passkey.credentialPublicKey,
-        counter: Number(passkey.counter)
-      }
-    });
+    let verification;
+    try {
+      verification = await verifyAuthenticationResponse({
+        response,
+        expectedChallenge: challengeData.challenge,
+        expectedOrigin: ORIGIN,
+        expectedRPID: RP_ID,
+        authenticator: {
+          credentialID: Buffer.from(passkey.credentialId, 'base64url'),
+          credentialPublicKey: passkey.credentialPublicKey,
+          counter: Number(passkey.counter)
+        }
+      });
+    } catch (err) {
+      const attemptResult = await this.loginAttemptService.recordAttempt(
+        passkey.user.email, ipAddress, deviceInfo?.userAgent, false, 'Passkey verification failed'
+      );
+      const warningMsg = this.loginAttemptService.getAttemptWarningMessage(
+        attemptResult.attemptCount, attemptResult.remainingAttempts
+      );
+      throw new Error(warningMsg || 'Passkey authentication failed');
+    }
 
     if (!verification.verified) {
-      throw new Error('Passkey authentication failed');
+      const attemptResult = await this.loginAttemptService.recordAttempt(
+        passkey.user.email, ipAddress, deviceInfo?.userAgent, false, 'Passkey verification failed'
+      );
+      const warningMsg = this.loginAttemptService.getAttemptWarningMessage(
+        attemptResult.attemptCount, attemptResult.remainingAttempts
+      );
+      throw new Error(warningMsg || 'Passkey authentication failed');
     }
+
+    await this.loginAttemptService.recordAttempt(passkey.user.email, ipAddress, deviceInfo?.userAgent, true);
 
     const riskAssessment = await this.riskService.assessLoginRisk(passkey.userId, deviceInfo, ipAddress);
 
@@ -195,7 +252,7 @@ export class PasskeyService {
       }
     });
 
-    this.challenges.delete(challengeKey);
+    await this.deleteChallenge(challengeKey);
 
     const device = await this.getOrCreateDevice(passkey.userId, deviceInfo, ipAddress);
     const tokens = generateTokens(passkey.userId, device.id);

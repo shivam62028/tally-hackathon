@@ -265,11 +265,56 @@ export class FailoverService {
       circuitState: 'n/a'
     };
 
+    const unhealthyProviders = Object.entries(status)
+      .filter(([_, s]) => !s.healthy)
+      .map(([name]) => name);
+
     return {
       providers: status,
       availableMethods: this.getAvailableMethods(),
       fallbackChain: FALLBACK_CHAIN,
+      unhealthyProviders,
+      systemHealthy: unhealthyProviders.length === 0,
       timestamp: new Date().toISOString()
+    };
+  }
+
+  simulateProviderFailure(provider, durationMs = 30000) {
+    this.updateProviderStatus(provider, false, 'simulated_failure');
+
+    const circuit = this.circuits.get(provider);
+    if (circuit) {
+      circuit.open();
+    }
+
+    setTimeout(() => {
+      this.updateProviderStatus(provider, true, 'recovered_from_simulation');
+      console.log(`Simulated failure ended for ${provider}`);
+    }, durationMs);
+
+    return {
+      provider,
+      failureSimulated: true,
+      recoveryIn: `${durationMs / 1000}s`,
+      currentStatus: this.getSystemStatus()
+    };
+  }
+
+  getFailoverExplanation(result) {
+    if (!result.failedMethods || result.failedMethods.length === 0) {
+      return {
+        usedMethod: result.method,
+        wasFailover: false,
+        message: `Request succeeded using ${result.method}`
+      };
+    }
+
+    const failedNames = result.failedMethods.map(f => f.method).join(', ');
+    return {
+      usedMethod: result.method,
+      wasFailover: true,
+      failedProviders: result.failedMethods,
+      message: `Primary method(s) failed (${failedNames}). Fell back to ${result.method}.`
     };
   }
 

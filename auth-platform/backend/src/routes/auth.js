@@ -218,4 +218,85 @@ router.delete('/devices/:deviceId', authenticate, async (req, res, next) => {
   }
 });
 
+router.post('/request-password-reset', async (req, res, next) => {
+  try {
+    const { email, reason } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const user = await req.prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.json({
+        submitted: true,
+        message: 'If an account exists with this email, a password reset request has been submitted for admin review.'
+      });
+    }
+
+    const existingRequest = await req.prisma.passwordResetRequest.findFirst({
+      where: { email, status: 'pending' }
+    });
+
+    if (existingRequest) {
+      return res.json({
+        submitted: true,
+        message: 'A password reset request is already pending for this email. Please wait for admin review.'
+      });
+    }
+
+    await req.prisma.passwordResetRequest.create({
+      data: {
+        email,
+        reason: reason || 'User requested password reset'
+      }
+    });
+
+    await req.prisma.adminNotification.create({
+      data: {
+        type: 'password_reset_request',
+        title: 'Password Reset Request',
+        message: `User ${email} has requested a password reset`,
+        email,
+        metadata: JSON.stringify({ reason: reason || 'Not provided' })
+      }
+    });
+
+    res.json({
+      submitted: true,
+      message: 'Your password reset request has been submitted. An admin will review it and contact you.'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/password-reset-status', async (req, res, next) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const request = await req.prisma.passwordResetRequest.findFirst({
+      where: { email },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (!request) {
+      return res.json({ hasRequest: false });
+    }
+
+    res.json({
+      hasRequest: true,
+      status: request.status,
+      createdAt: request.createdAt,
+      processedAt: request.processedAt
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

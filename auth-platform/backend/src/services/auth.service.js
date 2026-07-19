@@ -4,11 +4,13 @@ import QRCode from 'qrcode';
 import { generateTokens } from '../utils/jwt.js';
 import { generateSecureToken, hashData } from '../utils/crypto.js';
 import { RiskService } from './risk.service.js';
+import { LoginAttemptService } from './loginAttempt.service.js';
 
 export class AuthService {
   constructor(prisma) {
     this.prisma = prisma;
     this.riskService = new RiskService(prisma);
+    this.loginAttemptService = new LoginAttemptService(prisma);
   }
 
   async register(email, password) {
@@ -30,18 +32,41 @@ export class AuthService {
   }
 
   async loginWithPassword(email, password, deviceInfo, ipAddress) {
+    const lockStatus = await this.loginAttemptService.checkAccountLock(email);
+    if (lockStatus.locked) {
+      throw new Error(`Account temporarily locked. Try again in ${lockStatus.remainingMinutes} minute(s). Check your email for details.`);
+    }
+
     const user = await this.prisma.user.findUnique({ where: { email } });
 
     if (!user || !user.passwordHash) {
+      const attemptResult = await this.loginAttemptService.recordAttempt(
+        email, ipAddress, deviceInfo?.userAgent, false, 'Invalid credentials'
+      );
       await this.riskService.logFailedLogin(email, ipAddress, deviceInfo?.userAgent, 'Invalid credentials');
-      throw new Error('Invalid credentials');
+
+      const warningMsg = this.loginAttemptService.getAttemptWarningMessage(
+        attemptResult.attemptCount, attemptResult.remainingAttempts
+      );
+
+      throw new Error(warningMsg || 'Invalid credentials');
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      const attemptResult = await this.loginAttemptService.recordAttempt(
+        email, ipAddress, deviceInfo?.userAgent, false, 'Wrong password'
+      );
       await this.riskService.logFailedLogin(email, ipAddress, deviceInfo?.userAgent, 'Wrong password');
-      throw new Error('Invalid credentials');
+
+      const warningMsg = this.loginAttemptService.getAttemptWarningMessage(
+        attemptResult.attemptCount, attemptResult.remainingAttempts
+      );
+
+      throw new Error(warningMsg || 'Invalid credentials');
     }
+
+    await this.loginAttemptService.recordAttempt(email, ipAddress, deviceInfo?.userAgent, true);
 
     const riskAssessment = await this.riskService.assessLoginRisk(user.id, deviceInfo, ipAddress);
 
@@ -53,12 +78,7 @@ export class AuthService {
       throw new Error('Login restricted. Please verify your identity through another method or contact support.');
     }
 
-    const requiresStepUp = riskAssessment.decision === 'step_up' || user.totpEnabled;
-
-    if (requiresStepUp) {
-      if (!user.totpEnabled) {
-        throw new Error('Additional verification required but TOTP is not set up. Please enable two-factor authentication.');
-      }
+    if (user.totpEnabled) {
       const pendingToken = generateSecureToken(32);
       return {
         requiresTOTP: true,
